@@ -1,0 +1,16 @@
+{
+  "name": "家計簿 - レシート連携",
+  "short_name": "家計簿",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#F7F5EF",
+  "theme_color": "#2F5D50",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

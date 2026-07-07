@@ -103,14 +103,15 @@
     position:absolute;inset:0;opacity:0;cursor:pointer;
   }
 
-  table.items{width:100%;border-collapse:collapse;margin-top:4px;}
-  table.items th{font-size:11px;color:var(--ink-soft);text-align:left;font-weight:500;padding:4px 4px;}
-  table.items td{padding:5px 4px;vertical-align:top;}
-  table.items input,table.items select{font-size:13px;padding:7px 8px;}
-  .row-del{background:none;border:none;color:var(--warn);font-size:18px;padding:4px 6px;}
+  .items-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:4px;}
+  table.items{width:100%;min-width:640px;border-collapse:collapse;}
+  table.items th{font-size:11px;color:var(--ink-soft);text-align:left;font-weight:500;padding:4px 3px;white-space:nowrap;}
+  table.items td{padding:5px 3px;vertical-align:top;}
+  table.items input,table.items select{font-size:12.5px;padding:7px 6px;}
+  .row-del{background:none;border:none;color:var(--warn);font-size:18px;padding:4px 4px;}
 
   .bar-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
-  .bar-label{width:64px;font-size:12px;color:var(--ink-soft);flex-shrink:0;}
+  .bar-label{width:76px;font-size:12px;color:var(--ink-soft);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .bar-track{flex:1;height:10px;background:var(--accent-soft);border-radius:6px;overflow:hidden;}
   .bar-fill{height:100%;background:var(--accent);border-radius:6px;}
   .bar-amount{width:76px;text-align:right;font-size:13px;flex-shrink:0;}
@@ -122,6 +123,10 @@
   .total-hero{text-align:center;padding:6px 0 14px;}
   .total-hero .amount{font-size:34px;font-weight:700;font-family:"Hiragino Mincho ProN","Noto Serif JP",serif;}
   .total-hero .caption{font-size:12px;color:var(--ink-soft);}
+
+  .seg-toggle{display:flex;gap:6px;background:var(--bg);border-radius:10px;padding:4px;margin-bottom:12px;}
+  .seg-btn{flex:1;background:none;color:var(--ink-soft);padding:8px 4px;font-size:12px;border-radius:8px;}
+  .seg-btn.active{background:var(--surface);color:var(--accent);box-shadow:0 1px 2px rgba(0,0,0,.06);}
 
   .entry{
     display:flex;justify-content:space-between;align-items:center;
@@ -189,15 +194,27 @@
 
     <div class="card" id="reviewCard" style="display:none;">
       <h2>内容を確認・修正</h2>
+      <div id="mismatchBanner" style="display:none;background:var(--warn-soft);color:var(--warn);border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px;"></div>
       <label class="field">店舗名</label>
       <input type="text" id="storeInput">
       <div style="height:8px;"></div>
-      <table class="items" id="itemsTable">
-        <thead>
-          <tr><th style="width:26%">日付</th><th>品目</th><th style="width:20%">金額</th><th style="width:26%">カテゴリ</th><th></th></tr>
-        </thead>
-        <tbody id="itemsBody"></tbody>
-      </table>
+      <div class="items-scroll">
+        <table class="items" id="itemsTable">
+          <thead>
+            <tr>
+              <th style="width:13%">日付</th>
+              <th style="width:20%">品目</th>
+              <th style="width:11%">金額</th>
+              <th style="width:16%">大分類</th>
+              <th style="width:16%">小分類</th>
+              <th style="width:16%">商品種別</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="itemsBody"></tbody>
+        </table>
+      </div>
+      <datalist id="productTypeList"></datalist>
       <button class="add-row-btn" id="addRowBtn">＋ 品目を追加</button>
       <button class="primary" id="saveBtn" style="margin-top:14px;">この内容で保存</button>
     </div>
@@ -214,6 +231,11 @@
       <div class="total-hero">
         <div class="amount num" id="monthTotal">¥0</div>
         <div class="caption">今月の支出合計</div>
+      </div>
+      <div class="seg-toggle" id="summaryToggle">
+        <button class="seg-btn active" data-mode="category">カテゴリ別</button>
+        <button class="seg-btn" data-mode="store">店舗別</button>
+        <button class="seg-btn" data-mode="product">商品別</button>
       </div>
       <div id="summaryBars"></div>
     </div>
@@ -238,9 +260,10 @@
       <h2>使い方</h2>
       <p style="font-size:13px;color:var(--ink-soft);line-height:1.7;margin:0;">
         1. 「撮影」タブでレシートを撮影し解析<br>
-        2. 品目・金額・カテゴリを確認し、必要なら修正<br>
+        2. 品目・金額・大分類・小分類・商品種別を確認し、必要なら修正<br>
         3. 保存すると夫婦どちらの端末からでも同じスプレッドシートに記録<br>
-        4. 「一覧」タブで月ごとの支出をカテゴリ別に確認
+        4. 同じ日付・同じ合計金額のレシートが既にある場合は保存前に確認が出ます<br>
+        5. 「一覧」タブでカテゴリ別・店舗別・商品別に支出を確認
       </p>
     </div>
   </section>
@@ -256,14 +279,28 @@
 </nav>
 
 <script>
+const DEFAULT_CATEGORY_TREE = {
+  majors: ['食費','外食','日用品','交通','医療','娯楽','衣服','通信','住居','税','その他'],
+  minorMap: {
+    '食費': ['野菜・果物','肉','魚介','卵・乳製品','飲料','パン・米・麺','調味料・粉類','惣菜・弁当','お菓子・デザート','冷凍食品','その他'],
+    '外食': [], '日用品': [], '交通': [], '医療': [], '娯楽': [], '衣服': [], '通信': [], '住居': [], '税': [], 'その他': []
+  }
+};
+const DEFAULT_PRODUCT_TYPES = [
+  '牛乳','ヨーグルト','チーズ','バター','卵','食パン','米','麺類','小麦粉',
+  '鶏肉','豚肉','牛肉','ひき肉','魚','練り物','野菜','果物','豆腐','納豆',
+  '冷凍食品','惣菜','菓子','アイス','飲料','調味料','その他'
+];
+
 const state = {
   gasUrl: localStorage.getItem('kakeibo_gasUrl') || '',
   userName: localStorage.getItem('kakeibo_userName') || '',
-  categories: ['食費','外食','日用品','交通','医療','娯楽','衣服','通信','住居','その他'],
+  categoryTree: DEFAULT_CATEGORY_TREE,
+  productTypes: DEFAULT_PRODUCT_TYPES,
   currentMonth: new Date(),
   imageBase64: null,
   imageMime: null,
-  parsedItems: []
+  parsedItems: [] // {date, store, name, price, majorCategory, minorCategory, productType}
 };
 
 // ---------- タブ切替 ----------
@@ -349,10 +386,13 @@ ocrBtn.addEventListener('click', async ()=>{
       store: data.store || '',
       name: it.name || '品目',
       price: it.price || 0,
-      category: it.category || 'その他'
+      majorCategory: it.majorCategory || 'その他',
+      minorCategory: it.minorCategory || null,
+      productType: it.productType || ''
     }));
     document.getElementById('storeInput').value = data.store || '';
     renderItemsTable();
+    checkTotalMismatch(data.receiptTotal);
     document.getElementById('reviewCard').style.display = 'block';
   }catch(err){
     toast('解析に失敗しました: ' + err.message);
@@ -364,16 +404,37 @@ ocrBtn.addEventListener('click', async ()=>{
 
 async function ensureCategories(){
   try{
-    const cats = await callApi('getCategories', {});
-    if(cats && cats.length) state.categories = cats;
+    const meta = await callApi('getCategories', {});
+    if(meta && meta.majors && meta.majors.length) state.categoryTree = { majors: meta.majors, minorMap: meta.minorMap };
+    if(meta && meta.productTypes && meta.productTypes.length) state.productTypes = meta.productTypes;
+    renderProductTypeList();
   }catch(e){ /* GAS未設定時は既定カテゴリのまま */ }
 }
 
-function categoryOptions(selected){
-  let opts = state.categories.map(c=>
-    `<option value="${escapeHtml(c)}" ${c===selected?'selected':''}>${escapeHtml(c)}</option>`
+function renderProductTypeList(){
+  const list = document.getElementById('productTypeList');
+  list.innerHTML = state.productTypes.map(p=>`<option value="${escapeHtml(p)}">`).join('');
+}
+
+function majorOptions(selected){
+  let opts = state.categoryTree.majors.map(m=>
+    `<option value="${escapeHtml(m)}" ${m===selected?'selected':''}>${escapeHtml(m)}</option>`
   ).join('');
-  if(selected && state.categories.indexOf(selected)===-1){
+  if(selected && state.categoryTree.majors.indexOf(selected)===-1){
+    opts += `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`;
+  }
+  return opts;
+}
+
+function minorOptions(major, selected){
+  const minors = (state.categoryTree.minorMap && state.categoryTree.minorMap[major]) || [];
+  if(minors.length === 0){
+    return '<option value="">(小分類なし)</option>';
+  }
+  let opts = '<option value="">未選択</option>' + minors.map(m=>
+    `<option value="${escapeHtml(m)}" ${m===selected?'selected':''}>${escapeHtml(m)}</option>`
+  ).join('');
+  if(selected && minors.indexOf(selected)===-1){
     opts += `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`;
   }
   return opts;
@@ -388,7 +449,9 @@ function renderItemsTable(){
       <td><input type="date" value="${item.date}" data-idx="${idx}" data-f="date"></td>
       <td><input type="text" value="${escapeHtml(item.name)}" data-idx="${idx}" data-f="name"></td>
       <td><input type="number" value="${item.price}" data-idx="${idx}" data-f="price"></td>
-      <td><select data-idx="${idx}" data-f="category">${categoryOptions(item.category)}</select></td>
+      <td><select data-idx="${idx}" data-f="majorCategory">${majorOptions(item.majorCategory)}</select></td>
+      <td><select data-idx="${idx}" data-f="minorCategory">${minorOptions(item.majorCategory, item.minorCategory)}</select></td>
+      <td><input type="text" list="productTypeList" value="${escapeHtml(item.productType||'')}" data-idx="${idx}" data-f="productType" placeholder="例: 牛乳"></td>
       <td><button class="row-del" data-idx="${idx}">×</button></td>
     `;
     body.appendChild(tr);
@@ -397,7 +460,15 @@ function renderItemsTable(){
     el.addEventListener('change', ()=>{
       const idx = Number(el.dataset.idx);
       const f = el.dataset.f;
-      state.parsedItems[idx][f] = f==='price' ? Number(el.value) : el.value;
+      if(f==='price'){
+        state.parsedItems[idx][f] = Number(el.value);
+      }else{
+        state.parsedItems[idx][f] = el.value;
+      }
+      if(f==='majorCategory'){
+        state.parsedItems[idx].minorCategory = null;
+        renderItemsTable();
+      }
     });
   });
   body.querySelectorAll('.row-del').forEach(el=>{
@@ -409,22 +480,46 @@ function renderItemsTable(){
 }
 
 document.getElementById('addRowBtn').addEventListener('click', ()=>{
-  state.parsedItems.push({date: todayStr(), store: document.getElementById('storeInput').value, name:'', price:0, category: state.categories[0]});
+  state.parsedItems.push({
+    date: todayStr(),
+    store: document.getElementById('storeInput').value,
+    name:'',
+    price:0,
+    majorCategory: state.categoryTree.majors[0],
+    minorCategory: null,
+    productType: ''
+  });
   renderItemsTable();
 });
 
-document.getElementById('saveBtn').addEventListener('click', async ()=>{
+document.getElementById('saveBtn').addEventListener('click', ()=>{
+  doSave(false);
+});
+
+async function doSave(confirmDuplicate){
   const store = document.getElementById('storeInput').value;
   const items = state.parsedItems.map(it=>Object.assign({}, it, {store}));
   if(items.length===0){ toast('品目がありません'); return; }
   try{
-    const res = await callApi('save', {items, user: state.userName});
+    const res = await callApi('save', {items, user: state.userName, confirmDuplicate});
+    if(res.duplicate){
+      const m = res.match;
+      const proceed = confirm(
+        `${m.date} に合計¥${m.total.toLocaleString()}(${m.itemCount}品目)のレシートが` +
+        `既に登録されています。二重登録の可能性がありますが、このまま保存しますか?`
+      );
+      if(proceed){
+        doSave(true);
+      }
+      return;
+    }
     toast(`${res.saved}件保存しました`);
     resetCapture();
+    ensureCategories(); // 新しい商品種別が増えていれば候補を更新
   }catch(err){
     toast('保存に失敗しました: ' + err.message);
   }
-});
+}
 
 function resetCapture(){
   state.parsedItems = [];
@@ -436,7 +531,34 @@ function resetCapture(){
   document.getElementById('reviewCard').style.display = 'none';
 }
 
+function checkTotalMismatch(receiptTotal){
+  const banner = document.getElementById('mismatchBanner');
+  const sum = state.parsedItems.reduce((s,it)=>s + (Number(it.price)||0), 0);
+  if(receiptTotal===null || receiptTotal===undefined || receiptTotal===''){
+    banner.style.display = 'none';
+    return;
+  }
+  const total = Number(receiptTotal);
+  if(Math.abs(total - sum) > 1){
+    banner.textContent = `⚠ 品目の合計(¥${sum.toLocaleString()})とレシートの合計金額(¥${total.toLocaleString()})が一致しません。金額を確認してください。`;
+    banner.style.display = 'block';
+  }else{
+    banner.style.display = 'none';
+  }
+}
+
 // ---------- 一覧・集計 ----------
+let lastMonthlyData = null;
+let summaryMode = 'category';
+
+document.getElementById('summaryToggle').addEventListener('click', (e)=>{
+  const btn = e.target.closest('.seg-btn');
+  if(!btn) return;
+  summaryMode = btn.dataset.mode;
+  document.querySelectorAll('#summaryToggle .seg-btn').forEach(b=>b.classList.toggle('active', b===btn));
+  if(lastMonthlyData) renderBars(lastMonthlyData);
+});
+
 document.getElementById('prevMonth').addEventListener('click', ()=>{
   state.currentMonth.setMonth(state.currentMonth.getMonth()-1);
   loadMonth();
@@ -459,35 +581,24 @@ async function loadMonth(){
 }
 
 function renderSummary(data){
+  lastMonthlyData = data;
   document.getElementById('monthTotal').textContent = '¥' + (data.total||0).toLocaleString();
 
-  const bars = document.getElementById('summaryBars');
-  bars.innerHTML = '';
-  const entries = Object.entries(data.summary||{}).sort((a,b)=>b[1]-a[1]);
-  const max = entries.length ? entries[0][1] : 1;
-  entries.forEach(([cat, amount])=>{
-    const row = document.createElement('div');
-    row.className = 'bar-row';
-    row.innerHTML = `
-      <div class="bar-label">${escapeHtml(cat)}</div>
-      <div class="bar-track"><div class="bar-fill" style="width:${(amount/max*100).toFixed(0)}%"></div></div>
-      <div class="bar-amount num">¥${amount.toLocaleString()}</div>
-    `;
-    bars.appendChild(row);
-  });
-  if(entries.length===0){
-    bars.innerHTML = '<div class="empty">この月の記録はありません</div>';
-  }
+  renderBars(data);
 
   const list = document.getElementById('entryList');
   list.innerHTML = '';
   (data.items||[]).forEach(item=>{
     const row = document.createElement('div');
     row.className = 'entry';
+    const catLabel = item.minorCategory
+      ? `${escapeHtml(item.majorCategory)} ＞ ${escapeHtml(item.minorCategory)}`
+      : escapeHtml(item.majorCategory);
+    const productLabel = item.productType ? ` ・ ${escapeHtml(item.productType)}` : '';
     row.innerHTML = `
       <div>
         <div>${escapeHtml(item.name)}</div>
-        <div class="meta">${item.date} ・ ${escapeHtml(item.store||'')} ・ ${escapeHtml(item.category)}${item.user? ' ・ '+escapeHtml(item.user):''}</div>
+        <div class="meta">${item.date} ・ ${escapeHtml(item.store||'')} ・ ${catLabel}${productLabel}${item.user? ' ・ '+escapeHtml(item.user):''}</div>
       </div>
       <div style="text-align:right;">
         <div class="amount num">¥${item.price.toLocaleString()}</div>
@@ -512,6 +623,29 @@ function renderSummary(data){
   });
 }
 
+function renderBars(data){
+  const source = summaryMode === 'store' ? (data.storeSummary||{})
+    : summaryMode === 'product' ? (data.productSummary||{})
+    : (data.summary||{});
+  const bars = document.getElementById('summaryBars');
+  bars.innerHTML = '';
+  const entries = Object.entries(source).sort((a,b)=>b[1]-a[1]);
+  const max = entries.length ? entries[0][1] : 1;
+  entries.forEach(([label, amount])=>{
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML = `
+      <div class="bar-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(amount/max*100).toFixed(0)}%"></div></div>
+      <div class="bar-amount num">¥${amount.toLocaleString()}</div>
+    `;
+    bars.appendChild(row);
+  });
+  if(entries.length===0){
+    bars.innerHTML = '<div class="empty">この月の記録はありません</div>';
+  }
+}
+
 function monthStr(d){
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
 }
@@ -524,6 +658,7 @@ function escapeHtml(s){
 }
 
 // 初期化
+renderProductTypeList();
 ensureCategories();
 
 // PWA: Service Worker登録

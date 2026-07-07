@@ -123,6 +123,10 @@
   .total-hero{text-align:center;padding:6px 0 14px;}
   .total-hero .amount{font-size:34px;font-weight:700;font-family:"Hiragino Mincho ProN","Noto Serif JP",serif;}
   .total-hero .caption{font-size:12px;color:var(--ink-soft);}
+  .total-hero .compare{font-size:12px;margin-top:4px;font-weight:600;}
+  .total-hero .compare.up{color:var(--warn);}
+  .total-hero .compare.down{color:var(--accent);}
+  .total-hero .compare.flat{color:var(--ink-soft);font-weight:400;}
 
   .seg-toggle{display:flex;gap:6px;background:var(--bg);border-radius:10px;padding:4px;margin-bottom:12px;}
   .seg-btn{flex:1;background:none;color:var(--ink-soft);padding:8px 4px;font-size:12px;border-radius:8px;}
@@ -168,6 +172,16 @@
   }
   .toast.show{opacity:1;}
   .add-row-btn{width:100%;margin-top:6px;background:var(--accent-soft);color:var(--accent);}
+
+  .manage-major{border-bottom:1px solid var(--line);padding:8px 0;}
+  .manage-major:last-child{border-bottom:none;}
+  .manage-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;}
+  .manage-row .name{font-size:13.5px;font-weight:600;}
+  .manage-row.minor{padding-left:14px;}
+  .manage-row.minor .name{font-size:12.5px;font-weight:400;color:var(--ink-soft);}
+  .manage-actions{display:flex;gap:4px;flex-shrink:0;}
+  .manage-actions button{padding:5px 9px;font-size:11px;font-weight:500;border-radius:7px;}
+  .manage-add-minor{background:none;color:var(--accent);font-size:11.5px;padding:4px 0 4px 14px;text-align:left;width:auto;}
 </style>
 </head>
 <body>
@@ -190,6 +204,7 @@
       </div>
       <button class="primary" id="ocrBtn" style="margin-top:12px;" disabled>解析する</button>
       <div id="ocrSpinner" style="display:none;"><div class="spinner"></div></div>
+      <button class="ghost" id="manualEntryBtn" style="width:100%;margin-top:10px;">📝 レシートなしで入力する</button>
     </div>
 
     <div class="card" id="reviewCard" style="display:none;">
@@ -231,6 +246,7 @@
       <div class="total-hero">
         <div class="amount num" id="monthTotal">¥0</div>
         <div class="caption">今月の支出合計</div>
+        <div class="compare" id="monthCompare"></div>
       </div>
       <div class="seg-toggle" id="summaryToggle">
         <button class="seg-btn active" data-mode="category">カテゴリ別</button>
@@ -241,7 +257,31 @@
     </div>
     <div class="card">
       <h2>明細</h2>
+      <input type="text" id="entrySearch" placeholder="店舗名・品目・カテゴリで検索" style="margin-bottom:10px;">
       <div id="entryList"><div class="empty">この月の記録はありません</div></div>
+    </div>
+  </section>
+
+  <!-- 年間タブ -->
+  <section class="view" id="view-yearly">
+    <div class="card">
+      <div class="month-nav">
+        <button id="prevYear">＜</button>
+        <span class="label" id="yearLabel"></span>
+        <button id="nextYear">＞</button>
+      </div>
+      <div class="total-hero">
+        <div class="amount num" id="yearTotal">¥0</div>
+        <div class="caption">年間の支出合計</div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>月別推移</h2>
+      <div id="yearlyMonthBars"></div>
+    </div>
+    <div class="card">
+      <h2>カテゴリ別(年間)</h2>
+      <div id="yearlyCategoryBars"></div>
     </div>
   </section>
 
@@ -266,6 +306,18 @@
         5. 「一覧」タブでカテゴリ別・店舗別・商品別に支出を確認
       </p>
     </div>
+
+    <div class="card">
+      <h2>カテゴリ管理</h2>
+      <div id="majorList"></div>
+      <button class="plain" id="addMajorBtn" style="width:100%;margin-top:8px;">＋ 大分類を追加</button>
+    </div>
+
+    <div class="card">
+      <h2>商品種別管理</h2>
+      <div id="productTypeManageList"></div>
+      <button class="plain" id="addProductTypeBtn" style="width:100%;margin-top:8px;">＋ 商品種別を追加</button>
+    </div>
   </section>
 
 </main>
@@ -275,6 +327,7 @@
 <nav class="tabbar">
   <button class="tab-btn active" data-view="view-capture"><span class="ic">📷</span>撮影</button>
   <button class="tab-btn" data-view="view-summary"><span class="ic">📊</span>一覧</button>
+  <button class="tab-btn" data-view="view-yearly"><span class="ic">📈</span>年間</button>
   <button class="tab-btn" data-view="view-settings"><span class="ic">⚙️</span>設定</button>
 </nav>
 
@@ -298,6 +351,7 @@ const state = {
   categoryTree: DEFAULT_CATEGORY_TREE,
   productTypes: DEFAULT_PRODUCT_TYPES,
   currentMonth: new Date(),
+  currentYear: new Date().getFullYear(),
   imageBase64: null,
   imageMime: null,
   parsedItems: [] // {date, store, name, price, majorCategory, minorCategory, productType}
@@ -311,6 +365,7 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     btn.classList.add('active');
     document.getElementById(btn.dataset.view).classList.add('active');
     if(btn.dataset.view==='view-summary') loadMonth();
+    if(btn.dataset.view==='view-yearly') loadYearly();
   });
 });
 
@@ -402,13 +457,148 @@ ocrBtn.addEventListener('click', async ()=>{
   }
 });
 
+document.getElementById('manualEntryBtn').addEventListener('click', ()=>{
+  state.parsedItems = [{
+    date: todayStr(),
+    store: '',
+    name: '',
+    price: 0,
+    majorCategory: state.categoryTree.majors[0],
+    minorCategory: null,
+    productType: ''
+  }];
+  document.getElementById('storeInput').value = '';
+  document.getElementById('mismatchBanner').style.display = 'none';
+  renderItemsTable();
+  document.getElementById('reviewCard').style.display = 'block';
+  document.getElementById('reviewCard').scrollIntoView({behavior:'smooth', block:'start'});
+});
+
 async function ensureCategories(){
   try{
     const meta = await callApi('getCategories', {});
     if(meta && meta.majors && meta.majors.length) state.categoryTree = { majors: meta.majors, minorMap: meta.minorMap };
     if(meta && meta.productTypes && meta.productTypes.length) state.productTypes = meta.productTypes;
     renderProductTypeList();
+    renderManageUI();
   }catch(e){ /* GAS未設定時は既定カテゴリのまま */ }
+}
+
+// ---------- カテゴリ・商品種別管理 ----------
+function renderManageUI(){
+  const majorList = document.getElementById('majorList');
+  majorList.innerHTML = '';
+  state.categoryTree.majors.forEach(major=>{
+    const minors = state.categoryTree.minorMap[major] || [];
+    const block = document.createElement('div');
+    block.className = 'manage-major';
+    const canDeleteMajor = major !== 'その他';
+    block.innerHTML = `
+      <div class="manage-row">
+        <span class="name">${escapeHtml(major)}</span>
+        <div class="manage-actions">
+          <button class="plain" data-act="rename-major" data-major="${escapeHtml(major)}">名前変更</button>
+          ${canDeleteMajor ? `<button class="danger" data-act="delete-major" data-major="${escapeHtml(major)}">削除</button>` : ''}
+        </div>
+      </div>
+      ${minors.map(minor=>`
+        <div class="manage-row minor">
+          <span class="name">${escapeHtml(minor)}</span>
+          <div class="manage-actions">
+            <button class="plain" data-act="rename-minor" data-major="${escapeHtml(major)}" data-minor="${escapeHtml(minor)}">名前変更</button>
+            <button class="danger" data-act="delete-minor" data-major="${escapeHtml(major)}" data-minor="${escapeHtml(minor)}">削除</button>
+          </div>
+        </div>
+      `).join('')}
+      <button class="manage-add-minor" data-act="add-minor" data-major="${escapeHtml(major)}">＋ ${escapeHtml(major)}に小分類を追加</button>
+    `;
+    majorList.appendChild(block);
+  });
+
+  majorList.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>handleManageAction(btn.dataset));
+  });
+
+  const productList = document.getElementById('productTypeManageList');
+  productList.innerHTML = state.productTypes.map(p=>`
+    <div class="manage-row">
+      <span class="name">${escapeHtml(p)}</span>
+      <div class="manage-actions">
+        <button class="plain" data-act="rename-product" data-name="${escapeHtml(p)}">名前変更</button>
+        <button class="danger" data-act="delete-product" data-name="${escapeHtml(p)}">削除</button>
+      </div>
+    </div>
+  `).join('');
+  productList.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>handleManageAction(btn.dataset));
+  });
+}
+
+document.getElementById('addMajorBtn').addEventListener('click', async ()=>{
+  const name = prompt('新しい大分類の名前を入力してください');
+  if(!name) return;
+  try{
+    await callApi('addMajor', {name});
+    toast('追加しました');
+    await ensureCategories();
+  }catch(err){ toast('追加に失敗しました: ' + err.message); }
+});
+
+document.getElementById('addProductTypeBtn').addEventListener('click', async ()=>{
+  const name = prompt('新しい商品種別の名前を入力してください(例: 牛乳)');
+  if(!name) return;
+  try{
+    await callApi('addProductType', {name});
+    toast('追加しました');
+    await ensureCategories();
+  }catch(err){ toast('追加に失敗しました: ' + err.message); }
+});
+
+async function handleManageAction(ds){
+  try{
+    if(ds.act === 'rename-major'){
+      const newName = prompt(`「${ds.major}」の新しい名前(既存の大分類名を入力すると統合されます)`, ds.major);
+      if(!newName || newName === ds.major) return;
+      const res = await callApi('renameMajor', {oldName: ds.major, newName});
+      toast(`変更しました(${res.updatedRows}件の明細を更新)`);
+      await ensureCategories();
+    }else if(ds.act === 'delete-major'){
+      if(!confirm(`「${ds.major}」を削除しますか?この大分類の明細は「その他」に移動します。`)) return;
+      const res = await callApi('deleteMajor', {major: ds.major});
+      toast(`削除しました(${res.updatedRows}件の明細を「その他」に移動)`);
+      await ensureCategories();
+    }else if(ds.act === 'rename-minor'){
+      const newName = prompt(`「${ds.minor}」の新しい名前(既存の小分類名を入力すると統合されます)`, ds.minor);
+      if(!newName || newName === ds.minor) return;
+      const res = await callApi('renameMinor', {major: ds.major, oldMinor: ds.minor, newMinor: newName});
+      toast(`変更しました(${res.updatedRows}件の明細を更新)`);
+      await ensureCategories();
+    }else if(ds.act === 'delete-minor'){
+      if(!confirm(`「${ds.minor}」を削除しますか?該当する明細の小分類は空欄になります。`)) return;
+      const res = await callApi('deleteMinor', {major: ds.major, minor: ds.minor});
+      toast(`削除しました(${res.updatedRows}件の明細を更新)`);
+      await ensureCategories();
+    }else if(ds.act === 'add-minor'){
+      const name = prompt(`「${ds.major}」に追加する小分類の名前`);
+      if(!name) return;
+      await callApi('addMinor', {major: ds.major, minor: name});
+      toast('追加しました');
+      await ensureCategories();
+    }else if(ds.act === 'rename-product'){
+      const newName = prompt(`「${ds.name}」の新しい名前(既存の商品種別名を入力すると統合されます)`, ds.name);
+      if(!newName || newName === ds.name) return;
+      const res = await callApi('renameProductType', {oldName: ds.name, newName});
+      toast(`変更しました(${res.updatedRows}件の明細を更新)`);
+      await ensureCategories();
+    }else if(ds.act === 'delete-product'){
+      if(!confirm(`「${ds.name}」を候補一覧から削除しますか?(既存の明細のテキストは変わりません)`)) return;
+      await callApi('deleteProductType', {name: ds.name});
+      toast('削除しました');
+      await ensureCategories();
+    }
+  }catch(err){
+    toast('操作に失敗しました: ' + err.message);
+  }
 }
 
 function renderProductTypeList(){
@@ -582,13 +772,26 @@ async function loadMonth(){
 
 function renderSummary(data){
   lastMonthlyData = data;
+  const viewedYearMonth = monthStr(state.currentMonth);
   document.getElementById('monthTotal').textContent = '¥' + (data.total||0).toLocaleString();
+  renderMonthCompare(data);
 
   renderBars(data);
+  renderEntryList(data, viewedYearMonth, document.getElementById('entrySearch').value);
+}
+
+function renderEntryList(data, viewedYearMonth, searchTerm){
+  const term = (searchTerm||'').trim().toLowerCase();
+  const allItems = data.items||[];
+  const filtered = term ? allItems.filter(item=>{
+    const haystack = [item.name, item.store, item.majorCategory, item.minorCategory, item.productType, item.user]
+      .filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(term);
+  }) : allItems;
 
   const list = document.getElementById('entryList');
   list.innerHTML = '';
-  (data.items||[]).forEach(item=>{
+  filtered.forEach(item=>{
     const row = document.createElement('div');
     row.className = 'entry';
     const catLabel = item.minorCategory
@@ -607,20 +810,48 @@ function renderSummary(data){
     `;
     list.appendChild(row);
   });
-  if((data.items||[]).length===0){
-    list.innerHTML = '<div class="empty">この月の記録はありません</div>';
+  if(filtered.length===0){
+    list.innerHTML = `<div class="empty">${term ? '一致する明細がありません' : 'この月の記録はありません'}</div>`;
   }
   list.querySelectorAll('.del').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!confirm('この明細を削除しますか?')) return;
       try{
-        await callApi('deleteRow', {rowIndex: Number(btn.dataset.row)});
+        await callApi('deleteRow', {yearMonth: viewedYearMonth, rowIndex: Number(btn.dataset.row)});
         loadMonth();
       }catch(err){
         toast('削除に失敗しました');
       }
     });
   });
+}
+
+document.getElementById('entrySearch').addEventListener('input', (e)=>{
+  if(lastMonthlyData) renderEntryList(lastMonthlyData, monthStr(state.currentMonth), e.target.value);
+});
+
+function renderMonthCompare(data){
+  const el = document.getElementById('monthCompare');
+  if(data.previousTotal === null || data.previousTotal === undefined){
+    el.textContent = '';
+    el.className = 'compare';
+    return;
+  }
+  const diff = data.diff || 0;
+  const sign = diff > 0 ? '+' : diff < 0 ? '−' : '';
+  const absDiff = Math.abs(diff);
+  let percentText = '';
+  if(data.diffPercent !== null && data.diffPercent !== undefined){
+    const p = data.diffPercent;
+    percentText = ` (${p>0?'+':''}${p}%)`;
+  }
+  if(diff === 0){
+    el.textContent = `先月と同じ ・ 先月¥${data.previousTotal.toLocaleString()}`;
+    el.className = 'compare flat';
+  }else{
+    el.textContent = `先月比 ${sign}¥${absDiff.toLocaleString()}${percentText} ・ 先月¥${data.previousTotal.toLocaleString()}`;
+    el.className = 'compare ' + (diff > 0 ? 'up' : 'down');
+  }
 }
 
 function renderBars(data){
@@ -643,6 +874,65 @@ function renderBars(data){
   });
   if(entries.length===0){
     bars.innerHTML = '<div class="empty">この月の記録はありません</div>';
+  }
+}
+
+// ---------- 年間サマリー ----------
+document.getElementById('prevYear').addEventListener('click', ()=>{
+  state.currentYear -= 1;
+  loadYearly();
+});
+document.getElementById('nextYear').addEventListener('click', ()=>{
+  state.currentYear += 1;
+  loadYearly();
+});
+
+async function loadYearly(){
+  document.getElementById('yearLabel').textContent = `${state.currentYear}年`;
+  try{
+    const data = await callApi('getYearly', {year: String(state.currentYear)});
+    renderYearly(data);
+  }catch(err){
+    toast('取得に失敗しました: ' + err.message);
+  }
+}
+
+function renderYearly(data){
+  document.getElementById('yearTotal').textContent = '¥' + (data.yearTotal||0).toLocaleString();
+
+  // 月別推移(時系列順、最大値に対する相対バー)
+  const monthBars = document.getElementById('yearlyMonthBars');
+  monthBars.innerHTML = '';
+  const months = data.months || [];
+  const max = Math.max.apply(null, months.map(m=>m.total).concat([1]));
+  months.forEach(m=>{
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML = `
+      <div class="bar-label">${Number(m.month)}月</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(m.total/max*100).toFixed(0)}%"></div></div>
+      <div class="bar-amount num">¥${m.total.toLocaleString()}</div>
+    `;
+    monthBars.appendChild(row);
+  });
+
+  // カテゴリ別年間合計(金額の多い順)
+  const catBars = document.getElementById('yearlyCategoryBars');
+  catBars.innerHTML = '';
+  const entries = Object.entries(data.categorySummary||{}).sort((a,b)=>b[1]-a[1]);
+  const catMax = entries.length ? entries[0][1] : 1;
+  entries.forEach(([label, amount])=>{
+    const row = document.createElement('div');
+    row.className = 'bar-row';
+    row.innerHTML = `
+      <div class="bar-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(amount/catMax*100).toFixed(0)}%"></div></div>
+      <div class="bar-amount num">¥${amount.toLocaleString()}</div>
+    `;
+    catBars.appendChild(row);
+  });
+  if(entries.length===0){
+    catBars.innerHTML = '<div class="empty">この年の記録はありません</div>';
   }
 }
 

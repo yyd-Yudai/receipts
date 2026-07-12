@@ -153,6 +153,15 @@
   .entry .meta{color:var(--ink-soft);font-size:11px;margin-top:2px;}
   .entry .amount{font-weight:600;}
   .entry .del{color:var(--warn-soft);background:none;border:none;font-size:12px;padding:2px 6px;color:var(--warn);}
+  .entry .edit{background:none;border:none;font-size:12px;padding:2px 6px;color:var(--accent);}
+  .entry .edit-actions{display:flex;gap:2px;justify-content:flex-end;}
+
+  .edit-form{width:100%;padding:6px 0;}
+  .edit-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
+  .edit-form-grid input,.edit-form-grid select{font-size:12.5px;padding:7px 8px;}
+  .edit-form-grid .full{grid-column:1 / -1;}
+  .edit-form-actions{display:flex;gap:8px;}
+  .edit-form-actions button{flex:1;padding:8px;font-size:12.5px;}
 
   nav.tabbar{
     position:fixed;bottom:0;left:0;right:0;
@@ -573,7 +582,7 @@ function renderManageUI(){
 }
 
 document.getElementById('addMajorBtn').addEventListener('click', async ()=>{
-  const name = prompt('新しい大分類の名前を入力してください');
+  const name = prompt('新しい大分類の名前を入力してください\n\n【現在の大分類】\n' + state.categoryTree.majors.join('、'));
   if(!name) return;
   try{
     await callApi('addMajor', {name});
@@ -607,7 +616,8 @@ async function handleManageAction(ds){
       toast(`削除しました(${res.updatedRows}件の明細を更新)`);
       await ensureCategories();
     }else if(ds.act === 'add-minor'){
-      const name = prompt(`「${ds.major}」に追加する小分類の名前`);
+      const currentMinors = (state.categoryTree.minorMap[ds.major] || []);
+      const name = prompt(`「${ds.major}」に追加する小分類の名前\n\n【現在の${ds.major}の小分類】\n` + (currentMinors.length ? currentMinors.join('、') : 'なし'));
       if(!name) return;
       await callApi('addMinor', {major: ds.major, minor: name});
       toast('追加しました');
@@ -804,6 +814,7 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
   filtered.forEach(item=>{
     const row = document.createElement('div');
     row.className = 'entry';
+    row.dataset.rowIndex = item.rowIndex;
     const catLabel = item.minorCategory
       ? `${escapeHtml(item.majorCategory)} ＞ ${escapeHtml(item.minorCategory)}`
       : escapeHtml(item.majorCategory);
@@ -814,7 +825,10 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
       </div>
       <div style="text-align:right;">
         <div class="amount num">¥${item.price.toLocaleString()}</div>
-        <button class="del" data-row="${item.rowIndex}">削除</button>
+        <div class="edit-actions">
+          <button class="edit" data-row="${item.rowIndex}">編集</button>
+          <button class="del" data-row="${item.rowIndex}">削除</button>
+        </div>
       </div>
     `;
     list.appendChild(row);
@@ -822,6 +836,13 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
   if(filtered.length===0){
     list.innerHTML = `<div class="empty">${term ? '一致する明細がありません' : 'この月の記録はありません'}</div>`;
   }
+  list.querySelectorAll('.edit').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const item = filtered.find(it=>it.rowIndex === Number(btn.dataset.row));
+      if(!item) return;
+      openEditForm(btn.closest('.entry'), item, viewedYearMonth, data, searchTerm);
+    });
+  });
   list.querySelectorAll('.del').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!confirm('この明細を削除しますか?')) return;
@@ -832,6 +853,48 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
         toast('削除に失敗しました');
       }
     });
+  });
+}
+
+function openEditForm(rowEl, item, yearMonth, data, searchTerm){
+  rowEl.innerHTML = `
+    <div class="edit-form">
+      <div class="edit-form-grid">
+        <input type="date" class="ef-date" value="${item.date}">
+        <input type="text" class="ef-store" value="${escapeHtml(item.store||'')}" placeholder="店舗名">
+        <input type="text" class="ef-name full" value="${escapeHtml(item.name)}" placeholder="品目">
+        <input type="number" class="ef-price" value="${item.price}">
+        <select class="ef-major">${majorOptions(item.majorCategory)}</select>
+        <select class="ef-minor full">${minorOptions(item.majorCategory, item.minorCategory)}</select>
+      </div>
+      <div class="edit-form-actions">
+        <button class="primary ef-save">保存</button>
+        <button class="ghost ef-cancel">キャンセル</button>
+      </div>
+    </div>
+  `;
+  rowEl.querySelector('.ef-major').addEventListener('change', (e)=>{
+    rowEl.querySelector('.ef-minor').innerHTML = minorOptions(e.target.value, null);
+  });
+  rowEl.querySelector('.ef-cancel').addEventListener('click', ()=>{
+    renderEntryList(data, yearMonth, searchTerm);
+  });
+  rowEl.querySelector('.ef-save').addEventListener('click', async ()=>{
+    const updated = {
+      date: rowEl.querySelector('.ef-date').value,
+      store: rowEl.querySelector('.ef-store').value,
+      name: rowEl.querySelector('.ef-name').value,
+      price: Number(rowEl.querySelector('.ef-price').value) || 0,
+      majorCategory: rowEl.querySelector('.ef-major').value,
+      minorCategory: rowEl.querySelector('.ef-minor').value || null
+    };
+    try{
+      const res = await callApi('editRow', {yearMonth, rowIndex: item.rowIndex, item: updated});
+      toast(res.moved ? `更新しました(${res.newYearMonth}に移動)` : '更新しました');
+      loadMonth();
+    }catch(err){
+      toast('更新に失敗しました: ' + err.message);
+    }
   });
 }
 

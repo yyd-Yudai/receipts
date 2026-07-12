@@ -145,16 +145,37 @@
   .donut-legend-row .pct{color:var(--ink-soft);flex-shrink:0;width:34px;text-align:right;}
 
   .entry{
-    display:flex;justify-content:space-between;align-items:center;
+    display:flex;align-items:center;gap:10px;
     padding:10px 0;border-bottom:1px solid var(--line);
     font-size:13px;
   }
   .entry:last-child{border-bottom:none;}
+  .entry .entry-check{flex-shrink:0;}
+  .entry .entry-check input{width:17px;height:17px;accent-color:var(--accent);}
+  .entry .entry-body{flex:1;min-width:0;}
   .entry .meta{color:var(--ink-soft);font-size:11px;margin-top:2px;}
   .entry .amount{font-weight:600;}
   .entry .del{color:var(--warn-soft);background:none;border:none;font-size:12px;padding:2px 6px;color:var(--warn);}
   .entry .edit{background:none;border:none;font-size:12px;padding:2px 6px;color:var(--accent);}
   .entry .edit-actions{display:flex;gap:2px;justify-content:flex-end;}
+
+  .list-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:12px;color:var(--ink-soft);}
+  .list-toolbar button{background:none;color:var(--accent);font-size:12px;padding:4px 2px;}
+  .bulk-bar{
+    display:none;align-items:center;gap:8px;
+    background:var(--accent-soft);border-radius:10px;padding:8px 10px;margin-bottom:10px;
+    font-size:12.5px;color:var(--accent);flex-wrap:wrap;
+  }
+  .bulk-bar.show{display:flex;}
+  .bulk-bar .count{font-weight:600;margin-right:auto;}
+  .bulk-bar button{padding:7px 10px;font-size:12px;}
+  .bulk-category-form{
+    display:none;gap:8px;background:var(--surface);border:1px solid var(--line);
+    border-radius:10px;padding:10px;margin-bottom:10px;flex-wrap:wrap;align-items:center;
+  }
+  .bulk-category-form.show{display:flex;}
+  .bulk-category-form select{flex:1;min-width:110px;font-size:12.5px;padding:8px;}
+  .bulk-category-form button{padding:8px 12px;font-size:12px;}
 
   .edit-form{width:100%;padding:6px 0;}
   .edit-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;}
@@ -190,8 +211,11 @@
     position:fixed;bottom:88px;left:50%;transform:translateX(-50%);
     background:var(--ink);color:#fff;padding:10px 18px;border-radius:20px;
     font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s ease;z-index:30;
+    display:flex;align-items:center;gap:6px;max-width:88%;text-align:center;
   }
   .toast.show{opacity:1;}
+  .toast.success{background:var(--accent);}
+  .toast.error{background:var(--warn);}
   .add-row-btn{width:100%;margin-top:6px;background:var(--accent-soft);color:var(--accent);}
 
   /* ===== PC(幅900px以上)向けレイアウト: 左サイドバー + ダッシュボード2列 ===== */
@@ -335,6 +359,21 @@
     <div class="card">
       <h2>明細</h2>
       <input type="text" id="entrySearch" placeholder="店舗名・品目・カテゴリで検索" style="margin-bottom:10px;">
+      <div class="list-toolbar">
+        <button id="selectAllBtn">すべて選択</button>
+      </div>
+      <div class="bulk-bar" id="bulkBar">
+        <span class="count" id="bulkCount">0件選択中</span>
+        <button class="plain" id="bulkCategoryBtn">カテゴリを一括変更</button>
+        <button class="danger" id="bulkDeleteBtn">削除</button>
+        <button class="ghost" id="bulkClearBtn">選択解除</button>
+      </div>
+      <div class="bulk-category-form" id="bulkCategoryForm">
+        <select id="bulkMajorSelect"></select>
+        <select id="bulkMinorSelect"></select>
+        <button class="primary" id="bulkCategoryApplyBtn">適用</button>
+        <button class="ghost" id="bulkCategoryCancelBtn">キャンセル</button>
+      </div>
       <div id="entryList"><div class="empty">この月の記録はありません</div></div>
     </div>
   </section>
@@ -434,16 +473,17 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
   });
 });
 
-function toast(msg){
+function toast(msg, type){
   const t=document.getElementById('toast');
-  t.textContent=msg;
-  t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2200);
+  t.textContent=(type==='success'?'✓ ':type==='error'?'⚠ ':'') + msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(()=>{ t.classList.remove('show'); }, type==='error' ? 3200 : 2400);
 }
 
 async function callApi(action, payload){
   if(!state.gasUrl){
-    toast('設定タブでGAS Web App URLを登録してください');
+    toast('設定タブでGAS Web App URLを登録してください', 'error');
     throw new Error('no gas url');
   }
   const res = await fetch(state.gasUrl, {
@@ -467,7 +507,7 @@ document.getElementById('saveSettingsBtn').addEventListener('click', ()=>{
   localStorage.setItem('kakeibo_gasUrl', state.gasUrl);
   localStorage.setItem('kakeibo_userName', state.userName);
   updateUserBadge();
-  toast('設定を保存しました');
+  toast('設定を保存しました', 'success');
 });
 
 function updateUserBadge(){
@@ -514,7 +554,7 @@ ocrBtn.addEventListener('click', async ()=>{
     checkTotalMismatch(data.receiptTotal);
     document.getElementById('reviewCard').style.display = 'block';
   }catch(err){
-    toast('解析に失敗しました: ' + err.message);
+    toast('解析に失敗しました: ' + err.message, 'error');
   }finally{
     document.getElementById('ocrSpinner').style.display = 'none';
     ocrBtn.disabled = false;
@@ -586,9 +626,9 @@ document.getElementById('addMajorBtn').addEventListener('click', async ()=>{
   if(!name) return;
   try{
     await callApi('addMajor', {name});
-    toast('追加しました');
+    toast('追加しました', 'success');
     await ensureCategories();
-  }catch(err){ toast('追加に失敗しました: ' + err.message); }
+  }catch(err){ toast('追加に失敗しました: ' + err.message, 'error'); }
 });
 
 async function handleManageAction(ds){
@@ -597,34 +637,34 @@ async function handleManageAction(ds){
       const newName = prompt(`「${ds.major}」の新しい名前(既存の大分類名を入力すると統合されます)`, ds.major);
       if(!newName || newName === ds.major) return;
       const res = await callApi('renameMajor', {oldName: ds.major, newName});
-      toast(`変更しました(${res.updatedRows}件の明細を更新)`);
+      toast(`変更しました(${res.updatedRows}件の明細を更新)`, 'success');
       await ensureCategories();
     }else if(ds.act === 'delete-major'){
       if(!confirm(`「${ds.major}」を削除しますか?この大分類の明細は「その他」に移動します。`)) return;
       const res = await callApi('deleteMajor', {major: ds.major});
-      toast(`削除しました(${res.updatedRows}件の明細を「その他」に移動)`);
+      toast(`削除しました(${res.updatedRows}件の明細を「その他」に移動)`, 'success');
       await ensureCategories();
     }else if(ds.act === 'rename-minor'){
       const newName = prompt(`「${ds.minor}」の新しい名前(既存の小分類名を入力すると統合されます)`, ds.minor);
       if(!newName || newName === ds.minor) return;
       const res = await callApi('renameMinor', {major: ds.major, oldMinor: ds.minor, newMinor: newName});
-      toast(`変更しました(${res.updatedRows}件の明細を更新)`);
+      toast(`変更しました(${res.updatedRows}件の明細を更新)`, 'success');
       await ensureCategories();
     }else if(ds.act === 'delete-minor'){
       if(!confirm(`「${ds.minor}」を削除しますか?該当する明細の小分類は空欄になります。`)) return;
       const res = await callApi('deleteMinor', {major: ds.major, minor: ds.minor});
-      toast(`削除しました(${res.updatedRows}件の明細を更新)`);
+      toast(`削除しました(${res.updatedRows}件の明細を更新)`, 'success');
       await ensureCategories();
     }else if(ds.act === 'add-minor'){
       const currentMinors = (state.categoryTree.minorMap[ds.major] || []);
       const name = prompt(`「${ds.major}」に追加する小分類の名前\n\n【現在の${ds.major}の小分類】\n` + (currentMinors.length ? currentMinors.join('、') : 'なし'));
       if(!name) return;
       await callApi('addMinor', {major: ds.major, minor: name});
-      toast('追加しました');
+      toast('追加しました', 'success');
       await ensureCategories();
     }
   }catch(err){
-    toast('操作に失敗しました: ' + err.message);
+    toast('操作に失敗しました: ' + err.message, 'error');
   }
 }
 
@@ -709,7 +749,7 @@ document.getElementById('saveBtn').addEventListener('click', ()=>{
 async function doSave(confirmDuplicate){
   const store = document.getElementById('storeInput').value;
   const items = state.parsedItems.map(it=>Object.assign({}, it, {store}));
-  if(items.length===0){ toast('品目がありません'); return; }
+  if(items.length===0){ toast('品目がありません', 'error'); return; }
   try{
     const res = await callApi('save', {items, user: state.userName, confirmDuplicate});
     if(res.duplicate){
@@ -723,11 +763,11 @@ async function doSave(confirmDuplicate){
       }
       return;
     }
-    toast(`${res.saved}件保存しました`);
+    toast(`${res.saved}件保存しました`, 'success');
     resetCapture();
     ensureCategories(); // 新しいカテゴリが増えていれば候補を更新
   }catch(err){
-    toast('保存に失敗しました: ' + err.message);
+    toast('保存に失敗しました: ' + err.message, 'error');
   }
 }
 
@@ -771,10 +811,12 @@ document.getElementById('summaryToggle').addEventListener('click', (e)=>{
 
 document.getElementById('prevMonth').addEventListener('click', ()=>{
   state.currentMonth.setMonth(state.currentMonth.getMonth()-1);
+  selectedRows.clear();
   loadMonth();
 });
 document.getElementById('nextMonth').addEventListener('click', ()=>{
   state.currentMonth.setMonth(state.currentMonth.getMonth()+1);
+  selectedRows.clear();
   loadMonth();
 });
 
@@ -786,7 +828,7 @@ async function loadMonth(){
     const data = await callApi('getMonthly', {yearMonth: ym});
     renderSummary(data);
   }catch(err){
-    toast('取得に失敗しました: ' + err.message);
+    toast('取得に失敗しました: ' + err.message, 'error');
   }
 }
 
@@ -800,6 +842,8 @@ function renderSummary(data){
   renderEntryList(data, viewedYearMonth, document.getElementById('entrySearch').value);
 }
 
+let selectedRows = new Set();
+
 function renderEntryList(data, viewedYearMonth, searchTerm){
   const term = (searchTerm||'').trim().toLowerCase();
   const allItems = data.items||[];
@@ -808,6 +852,10 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
       .filter(Boolean).join(' ').toLowerCase();
     return haystack.includes(term);
   }) : allItems;
+
+  // 表示されなくなった行の選択は解除しておく(検索絞り込み・月切替時の不整合防止)
+  const visibleRowIndexes = new Set(filtered.map(it=>it.rowIndex));
+  selectedRows.forEach(r=>{ if(!visibleRowIndexes.has(r)) selectedRows.delete(r); });
 
   const list = document.getElementById('entryList');
   list.innerHTML = '';
@@ -818,8 +866,10 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
     const catLabel = item.minorCategory
       ? `${escapeHtml(item.majorCategory)} ＞ ${escapeHtml(item.minorCategory)}`
       : escapeHtml(item.majorCategory);
+    const checked = selectedRows.has(item.rowIndex) ? 'checked' : '';
     row.innerHTML = `
-      <div>
+      <label class="entry-check"><input type="checkbox" class="entry-checkbox" data-row="${item.rowIndex}" ${checked}></label>
+      <div class="entry-body">
         <div>${escapeHtml(item.name)}</div>
         <div class="meta">${item.date} ・ ${escapeHtml(item.store||'')} ・ ${catLabel}${item.user? ' ・ '+escapeHtml(item.user):''}</div>
       </div>
@@ -836,6 +886,13 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
   if(filtered.length===0){
     list.innerHTML = `<div class="empty">${term ? '一致する明細がありません' : 'この月の記録はありません'}</div>`;
   }
+  list.querySelectorAll('.entry-checkbox').forEach(cb=>{
+    cb.addEventListener('change', ()=>{
+      const r = Number(cb.dataset.row);
+      if(cb.checked) selectedRows.add(r); else selectedRows.delete(r);
+      updateBulkBar();
+    });
+  });
   list.querySelectorAll('.edit').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const item = filtered.find(it=>it.rowIndex === Number(btn.dataset.row));
@@ -848,13 +905,91 @@ function renderEntryList(data, viewedYearMonth, searchTerm){
       if(!confirm('この明細を削除しますか?')) return;
       try{
         await callApi('deleteRow', {yearMonth: viewedYearMonth, rowIndex: Number(btn.dataset.row)});
+        toast('削除しました', 'success');
         loadMonth();
       }catch(err){
-        toast('削除に失敗しました');
+        toast('削除に失敗しました', 'error');
       }
     });
   });
+
+  document.getElementById('selectAllBtn').onclick = ()=>{
+    const allSelected = filtered.length>0 && filtered.every(it=>selectedRows.has(it.rowIndex));
+    if(allSelected){
+      filtered.forEach(it=>selectedRows.delete(it.rowIndex));
+    }else{
+      filtered.forEach(it=>selectedRows.add(it.rowIndex));
+    }
+    renderEntryList(data, viewedYearMonth, searchTerm);
+    updateBulkBar();
+  };
+
+  updateBulkBar();
+
+  function updateBulkBar(){
+    document.querySelectorAll('.entry-checkbox').forEach(cb=>{
+      cb.checked = selectedRows.has(Number(cb.dataset.row));
+    });
+    const bar = document.getElementById('bulkBar');
+    const n = selectedRows.size;
+    document.getElementById('bulkCount').textContent = `${n}件選択中`;
+    bar.classList.toggle('show', n>0);
+    if(n===0){
+      document.getElementById('bulkCategoryForm').classList.remove('show');
+    }
+    document.getElementById('selectAllBtn').textContent =
+      (filtered.length>0 && filtered.every(it=>selectedRows.has(it.rowIndex))) ? '選択解除' : 'すべて選択';
+
+    document.getElementById('bulkClearBtn').onclick = ()=>{
+      selectedRows.clear();
+      renderEntryList(data, viewedYearMonth, searchTerm);
+    };
+    document.getElementById('bulkDeleteBtn').onclick = async ()=>{
+      if(selectedRows.size===0) return;
+      if(!confirm(`選択した${selectedRows.size}件を削除しますか?`)) return;
+      try{
+        await callApi('bulkDelete', {yearMonth: viewedYearMonth, rowIndices: Array.from(selectedRows)});
+        toast(`${selectedRows.size}件削除しました`, 'success');
+        selectedRows.clear();
+        loadMonth();
+      }catch(err){
+        toast('一括削除に失敗しました: ' + err.message, 'error');
+      }
+    };
+    document.getElementById('bulkCategoryBtn').onclick = ()=>{
+      const form = document.getElementById('bulkCategoryForm');
+      document.getElementById('bulkMajorSelect').innerHTML = majorOptions(state.categoryTree.majors[0]);
+      document.getElementById('bulkMinorSelect').innerHTML = minorOptions(state.categoryTree.majors[0], null);
+      form.classList.add('show');
+    };
+  }
 }
+
+document.getElementById('bulkMajorSelect').addEventListener('change', (e)=>{
+  document.getElementById('bulkMinorSelect').innerHTML = minorOptions(e.target.value, null);
+});
+document.getElementById('bulkCategoryCancelBtn').addEventListener('click', ()=>{
+  document.getElementById('bulkCategoryForm').classList.remove('show');
+});
+document.getElementById('bulkCategoryApplyBtn').addEventListener('click', async ()=>{
+  const major = document.getElementById('bulkMajorSelect').value;
+  const minor = document.getElementById('bulkMinorSelect').value || null;
+  if(selectedRows.size===0) return;
+  try{
+    await callApi('bulkEditCategory', {
+      yearMonth: monthStr(state.currentMonth),
+      rowIndices: Array.from(selectedRows),
+      majorCategory: major,
+      minorCategory: minor
+    });
+    toast(`${selectedRows.size}件のカテゴリを変更しました`, 'success');
+    selectedRows.clear();
+    document.getElementById('bulkCategoryForm').classList.remove('show');
+    loadMonth();
+  }catch(err){
+    toast('一括変更に失敗しました: ' + err.message, 'error');
+  }
+});
 
 function openEditForm(rowEl, item, yearMonth, data, searchTerm){
   rowEl.innerHTML = `
@@ -890,10 +1025,10 @@ function openEditForm(rowEl, item, yearMonth, data, searchTerm){
     };
     try{
       const res = await callApi('editRow', {yearMonth, rowIndex: item.rowIndex, item: updated});
-      toast(res.moved ? `更新しました(${res.newYearMonth}に移動)` : '更新しました');
+      toast(res.moved ? `更新しました(${res.newYearMonth}に移動)` : '更新しました', 'success');
       loadMonth();
     }catch(err){
-      toast('更新に失敗しました: ' + err.message);
+      toast('更新に失敗しました: ' + err.message, 'error');
     }
   });
 }
@@ -1014,7 +1149,7 @@ async function loadYearly(){
     const data = await callApi('getYearly', {year: String(state.currentYear)});
     renderYearly(data);
   }catch(err){
-    toast('取得に失敗しました: ' + err.message);
+    toast('取得に失敗しました: ' + err.message, 'error');
   }
 }
 
